@@ -1,73 +1,45 @@
 import numpy as np
 import math
 import timeit
+import matplotlib
+matplotlib.use('Qt5Agg')
 import matplotlib.pyplot as plt
+
 from mpl_toolkits.mplot3d import Axes3D 
 
 from quadrotor import Quadrotor3D
 from controller import Controller
 
-from utils import quaternion_to_euler
+from utils import quaternion_to_euler, transform_trajectory
 
-def createTrajectory(sim_time, dt):
+def createTrajectory(points_count):
     xref = []
     yref = []
     zref = []
-    radius = 1.0
-    height = -2.0  # Modified to make z negative
+    radius = 5.0
+    height = -100.0  # Modified to make z negative
     offset_height = -1.0  # Offset height
     num_turns = 2
-    for i in range(int(sim_time / dt)):
-        t = dt * i
-        x = radius * math.cos(2 * math.pi * num_turns * t / sim_time)
-        y = radius * math.sin(2 * math.pi * num_turns * t / sim_time)
-        z = height * t / sim_time + offset_height  # Add offset height
+    for i in range(points_count):
+        t = i / points_count
+        x = radius * math.cos(2 * math.pi * num_turns * t)
+        y = radius * math.sin(2 * math.pi * num_turns * t)
+        z = height * t + offset_height  # Add offset height
         xref.append(x)
         yref.append(y)
         zref.append(z)
     return np.array(xref), np.array(yref), np.array(zref)
 
-def move2Goal():
-    dt = 0.1    # Time step
-    N = 10      # Horizontal length
+def trackTrajectory():
+    dt = 0.1      # Time step
+    sim_time = 20 # Simulation time
+    N = 100       # Horizontal length
     
     quad = Quadrotor3D()    # Quadrotor model
     controller = Controller(quad, t_horizon=2*N*dt, n_nodes=N)  # Initialize MPC controller
-
-    goal = np.array([0,5,10])
-    path = []
-
-    # Main loop
-    while np.linalg.norm(goal-quad.pos) > 0.1:
-        current = np.concatenate([quad.pos, quad.angle, quad.vel, quad.a_rate])
-        thrust = controller.run_optimization(initial_state=current, goal=goal)[:4]
-        quad.update(thrust, dt)
-        path.append(quad.pos)
-
-    # Visualization
-    path = np.array(path)
-    print(path)
-    plt.figure()
-    ax = plt.axes(projection='3d')
-    ax.plot(path[:,0], path[:,1], path[:,2])
-    # ax.plot(xref, yref, zref)
-    ax.scatter(goal[0], goal[1], goal[2], c=[1,0,0], label='goal')
-    ax.axis('auto')
-    ax.set_xlabel('x [m]')
-    ax.set_ylabel('y [m]')
-    ax.set_zlabel('z [m]')
-    ax.legend()
-    plt.show()
-
-def trackTrajectory():
-    dt = 0.01    # Time step
-    N = 10      # Horizontal length
-    
-    quad = Quadrotor3D()    # Quadrotor model
-    controller = Controller(quad, t_horizon=2*N*dt*10, n_nodes=N)  # Initialize MPC controller
-
-    sim_time = 50
-    xref, yref, zref = createTrajectory(sim_time, dt)
+    xref, yref, zref = createTrajectory(1000)
+    trajectory = np.array([xref, yref, zref]).T
+    controller.update_trajectory(trajectory, preferred_speed=8)
     path = []
     q_path = []
     u_path = []
@@ -75,18 +47,9 @@ def trackTrajectory():
     # Main loop
     time_record = []
     for i in range(int(sim_time/dt)):
-        # print(i)
-        x = xref[i:i+N+1]; y = yref[i:i+N+1]; z = zref[i:i+N+1]
-        if len(x) < N+1:
-            x = np.concatenate((x,np.ones(N+1-len(x))*xref[-1]),axis=None)
-            y = np.concatenate((y,np.ones(N+1-len(y))*yref[-1]),axis=None)
-            z = np.concatenate((z,np.ones(N+1-len(z))*zref[-1]),axis=None)
-        goal=np.array([x,y,z]).T
-        print(goal)
-
         current = np.concatenate([quad.pos, quad.angle, quad.vel, quad.a_rate])
         start = timeit.default_timer()
-        thrust = controller.run_optimization(initial_state=current, goal=goal, mode='traj')[:4]
+        thrust = controller.run_optimization(initial_state=current)[:4]
         time_record.append(timeit.default_timer() - start)
         quad.update(thrust, dt)
         path.append(quad.pos)

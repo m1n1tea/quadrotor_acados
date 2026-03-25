@@ -3,7 +3,6 @@ import math
 import json
 import errno
 import shutil
-import joblib
 import random
 import pyquaternion
 import numpy as np
@@ -14,7 +13,6 @@ from sklearn.cluster import KMeans
 from scipy.interpolate.interpolate import interp1d
 import matplotlib.pyplot as plt
 import xml.etree.ElementTree as XMLtree
-
 
 def safe_mkdir_recursive(directory, overwrite=False):
     if not os.path.exists(directory):
@@ -663,3 +661,59 @@ def separate_variables(traj):
     v_traj = traj[:, 7:10]
     r_traj = traj[:, 10:]
     return [p_traj, a_traj, v_traj, r_traj]
+
+def separate_variables(traj):
+    """
+    Reshapes a trajectory into expected format.
+
+    :param traj: N x 13 array representing the reference trajectory
+    :return: A list with the components: Nx3 position trajectory array, Nx4 quaternion trajectory array, Nx3 velocity
+    trajectory array, Nx3 body rate trajectory array
+    """
+
+    p_traj = traj[:, :3]
+    a_traj = traj[:, 3:7]
+    v_traj = traj[:, 7:10]
+    r_traj = traj[:, 10:]
+    return [p_traj, a_traj, v_traj, r_traj]
+
+def dist(point1, point2):
+    dxyz = point2[0:3] - point1[0:3]
+    return np.sqrt(np.sum(dxyz ** 2))
+
+def local_interpolate(point1, point2, preferred_dist):
+
+    xyz1 = point1[0:3]
+    xyz2 = point2[0:3]
+
+    dxyz = xyz2 - xyz1
+    dist = np.sqrt(np.sum(dxyz ** 2))
+
+    if (preferred_dist > dist):
+        return point1
+    t = preferred_dist / dist
+
+    
+    point = np.zeros_like(point1)
+    point[0:3] = xyz1 + t * dxyz
+    return point
+
+def transform_trajectory(traj, preferred_speed):
+    current_point = traj[0]
+    passed_distance = 0
+    new_traj = np.array([current_point])
+    i = 0
+    eps = 1e-9
+    while( i < len(traj)):
+        new_point = local_interpolate(current_point, traj[i], preferred_speed - passed_distance)
+        if dist(current_point, new_point) < eps:
+            passed_distance += dist(current_point, traj[i])
+            current_point = traj[i]
+            i+=1
+        else:
+            new_traj = np.append(new_traj, np.array([new_point]), axis=0)
+            current_point = new_point
+            passed_distance = 0
+
+    new_traj = np.append(new_traj, np.array([traj[-1]]), axis=0)
+    return new_traj

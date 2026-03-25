@@ -3,7 +3,7 @@ import casadi as cs
 import numpy as np
 from acados_template import AcadosOcp, AcadosOcpSolver, AcadosModel
 from quadrotor import Quadrotor3D
-from utils import skew_symmetric, v_dot_q, quaternion_inverse
+from utils import skew_symmetric, v_dot_q, quaternion_inverse, transform_trajectory
 
 class Controller:
     def __init__(self, quad:Quadrotor3D, t_horizon=1, n_nodes=20,
@@ -74,7 +74,7 @@ class Controller:
             self.quad_xdot[dyn_model_idx] = cs.Function('x_dot', [self.x, self.u], [dyn], ['x', 'u'], ['x_dot'])
 
         # ### Setup and compile Acados OCP solvers ### #
-        self.acados_ocp_solver = {}
+        self.acados_ocp_solver = None
 
         # Add one more weight to the rotation (use quaternion norm weighting in acados)
         q_diagonal = np.concatenate((q_cost[:3], np.mean(q_cost[3:6])[np.newaxis], q_cost[3:]))
@@ -135,7 +135,7 @@ class Controller:
 
             # Compile acados OCP solver if necessary
             json_file = os.path.join('./', key_model.name + '_acados_ocp.json')
-            self.acados_ocp_solver[key] = AcadosOcpSolver(ocp, json_file=json_file)
+            self.acados_ocp_solver = AcadosOcpSolver(ocp, json_file=json_file)
 
     def acados_setup_model(self, nominal, model_name):
         """
@@ -232,8 +232,24 @@ class Controller:
             (cs.mtimes(f_thrust.T, y_f) + (self.quad.J[1] - self.quad.J[2]) * self.r[1] * self.r[2]) / self.quad.J[0],
             (-cs.mtimes(f_thrust.T, x_f) + (self.quad.J[2] - self.quad.J[0]) * self.r[2] * self.r[0]) / self.quad.J[1],
             (cs.mtimes(f_thrust.T, c_f) + (self.quad.J[0] - self.quad.J[1]) * self.r[0] * self.r[1]) / self.quad.J[2])
+    
+    def update_trajectory(self, trajectory, preferred_speed = None):
+        """
+        Sets trajectory for the controlled object to pursue
 
-    def run_optimization(self, initial_state=None, goal=None, use_model=0, return_x=False, mode='pose'):
+        :param trajectory: 2d numpy array of (N+1) elements with size 3 [x,y,z] 
+        """
+        if preferred_speed == None:
+            self.time_traj = trajectory
+        else:
+            self.time_traj = transform_trajectory(trajectory, preferred_speed * self.T / self.N)
+        print("preferred distance between points:", preferred_speed * self.T / self.N)
+        print("len(self.time_traj):", len(self.time_traj))
+        print("first ten points:", self.time_traj[:10])
+        self.last_closest_index = 0
+        
+
+    def run_optimization(self, initial_state=None, return_x=False):
         """
         Optimizes a trajectory to reach the pre-set target state, starting from the input initial state, that minimizes
         the quadratic cost function and respects the constraints of the system
@@ -254,34 +270,33 @@ class Controller:
         x_init = np.stack(x_init)
 
         # Set initial condition, equality constraint
-        self.acados_ocp_solver[use_model].set(0, 'lbx', x_init)
-        self.acados_ocp_solver[use_model].set(0, 'ubx', x_init)
+        self.acados_ocp_solver.set(0, 'lbx', x_init)
+        self.acados_ocp_solver.set(0, 'ubx', x_init)
 
-        # Set final condition
-        if mode == "pose":
-            for j in range(self.N):
-                y_ref = np.array([goal[0], goal[1], goal[2], 1,0,0,0, 0,0,0, 0,0,0, 0,0,0,0])
-                self.acados_ocp_solver[use_model].set(j, 'yref', y_ref)
-            y_refN = np.array([goal[0], goal[1], goal[2], 1,0,0,0, 0,0,0, 0,0,0])
-            self.acados_ocp_solver[use_model].set(self.N, 'yref', y_refN)
-        else: # for 'traj' mode
-            for j in range(self.N):
-                # repeat the current reference for the horizon
-                y_ref = np.array([goal[j,0], goal[j,1], goal[j,2], 1,0,0,0, 0,0,0, 0,0,0, 0,0,0,0])
-                self.acados_ocp_solver[use_model].set(j, 'yref', y_ref)
-            y_refN = np.array([goal[self.N,0], goal[self.N,1], goal[self.N,2], 1,0,0,0, 0,0,0, 0,0,0])
-            self.acados_ocp_solver[use_model].set(self.N, 'yref', y_refN)
+        starting_index = np.argmin(np.sum((self.time_traj[self.last_closest_index:] - initial_state[:3])**2, axis=1)) + self.last_closest_index
+        
+        local_trajectory = self.time_traj[starting_index:starting_index + self.N + 1]
+        if len(local_trajectory) < self.N + 1:
+            local_trajectory = np.pad(local_trajectory, ((0,self.N + 1 - len(local_trajectory)), (0, 0)), 'edge')
+        self.last_closest_index = starting_index
+
+        for j in range(self.N):
+            y_ref = np.array([local_trajectory[j,0], local_trajectory[j,1], local_trajectory[j,2], 1,0,0,0, 0,0,0, 0,0,0, 0,0,0,0])
+            self.acados_ocp_solver.set(j, 'yref', y_ref)
+
+        y_refN = np.array([local_trajectory[self.N,0], local_trajectory[self.N,1], local_trajectory[self.N,2], 1,0,0,0, 0,0,0, 0,0,0])
+        self.acados_ocp_solver.set(self.N, 'yref', y_refN)
 
         # Solve OCP
-        self.acados_ocp_solver[use_model].solve()
+        self.acados_ocp_solver.solve()
 
         # Get u
         w_opt_acados = np.ndarray((self.N, 4))
         x_opt_acados = np.ndarray((self.N + 1, len(x_init)))
-        x_opt_acados[0, :] = self.acados_ocp_solver[use_model].get(0, "x")
+        x_opt_acados[0, :] = self.acados_ocp_solver.get(0, "x")
         for i in range(self.N):
-            w_opt_acados[i, :] = self.acados_ocp_solver[use_model].get(i, "u")
-            x_opt_acados[i + 1, :] = self.acados_ocp_solver[use_model].get(i + 1, "x")
+            w_opt_acados[i, :] = self.acados_ocp_solver.get(i, "u")
+            x_opt_acados[i + 1, :] = self.acados_ocp_solver.get(i + 1, "x")
 
         w_opt_acados = np.reshape(w_opt_acados, (-1))
         return w_opt_acados if not return_x else (w_opt_acados, x_opt_acados)
