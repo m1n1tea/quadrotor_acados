@@ -229,9 +229,9 @@ class Controller:
         x_f = cs.MX(self.quad.x_f)
         c_f = cs.MX(self.quad.z_l_tau)
         return cs.vertcat(
-            (cs.mtimes(f_thrust.T, y_f) + (self.quad.J[1] - self.quad.J[2]) * self.r[1] * self.r[2]) / self.quad.J[0],
-            (-cs.mtimes(f_thrust.T, x_f) + (self.quad.J[2] - self.quad.J[0]) * self.r[2] * self.r[0]) / self.quad.J[1],
-            (cs.mtimes(f_thrust.T, c_f) + (self.quad.J[0] - self.quad.J[1]) * self.r[0] * self.r[1]) / self.quad.J[2])
+            (-cs.mtimes(f_thrust.T, y_f) + (self.quad.J[1] - self.quad.J[2]) * self.r[1] * self.r[2]) / self.quad.J[0],
+            (cs.mtimes(f_thrust.T, x_f) + (self.quad.J[2] - self.quad.J[0]) * self.r[2] * self.r[0]) / self.quad.J[1],
+            (-cs.mtimes(f_thrust.T, c_f) + (self.quad.J[0] - self.quad.J[1]) * self.r[0] * self.r[1]) / self.quad.J[2])
     
     def update_trajectory(self, trajectory, preferred_speed = None):
         """
@@ -249,7 +249,7 @@ class Controller:
         self.last_closest_index = 0
         
 
-    def run_optimization(self, initial_state=None, return_x=False):
+    def run_optimization(self, initial_state=None):
         """
         Optimizes a trajectory to reach the pre-set target state, starting from the input initial state, that minimizes
         the quadratic cost function and respects the constraints of the system
@@ -257,7 +257,6 @@ class Controller:
         :param initial_state: 13-element list of the initial state. If None, 0 state will be used
         :param goal: 3 element [x,y,z] for moving to goal mode, 3*(N+1) for trajectory tracking mode
         :param use_model: integer, select which model to use from the available options.
-        :param return_x: bool, whether to also return the optimized sequence of states alongside with the controls.
         :param mode: string, whether to use moving to pose mode or tracking mode
         :return: optimized control input sequence (flattened)
         """
@@ -299,4 +298,4 @@ class Controller:
             x_opt_acados[i + 1, :] = self.acados_ocp_solver.get(i + 1, "x")
 
         w_opt_acados = np.reshape(w_opt_acados, (-1))
-        return w_opt_acados if not return_x else (w_opt_acados, x_opt_acados)
+        return w_opt_acados[:4]

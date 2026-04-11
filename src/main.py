@@ -9,6 +9,7 @@ from mpl_toolkits.mplot3d import Axes3D
 
 from quadrotor import Quadrotor3D
 from controller import Controller
+from pid_controller import PIDController
 
 from utils import quaternion_to_euler, transform_trajectory
 
@@ -16,33 +17,48 @@ def createTrajectory(points_count):
     xref = []
     yref = []
     zref = []
-    radius = 5.0
-    height = -100.0  # Modified to make z negative
-    offset_height = -1.0  # Offset height
-    num_turns = 2
+    radius = 2.0
+    height = 3.0 
+    offset_height = 0  # Offset height
+    num_turns = 0
+    x_offset = 1
+    y_offset = 0.5
     for i in range(points_count):
-        t = i / points_count
-        x = radius * math.cos(2 * math.pi * num_turns * t)
-        y = radius * math.sin(2 * math.pi * num_turns * t)
+        t = i / (points_count-1)
+        x = radius * math.cos(2 * math.pi * num_turns * t) + x_offset * t - radius
+        y = radius * math.sin(2 * math.pi * num_turns * t) + y_offset * t
         z = height * t + offset_height  # Add offset height
         xref.append(x)
         yref.append(y)
         zref.append(z)
-    return np.array(xref), np.array(yref), np.array(zref)
+    return np.array([np.array(xref), np.array(yref), np.array(zref)]).T
 
-def trackTrajectory():
-    dt = 0.1      # Time step
-    sim_time = 20 # Simulation time
-    N = 100       # Horizontal length
+def trackTrajectory(trajectory, preferred_speed = 0.5, noise = False, controller_type="Acados", ):
+    sim_time = 7 # Simulation time
+    N = 20       # Horizontal length
     
-    quad = Quadrotor3D()    # Quadrotor model
-    controller = Controller(quad, t_horizon=2*N*dt, n_nodes=N)  # Initialize MPC controller
-    xref, yref, zref = createTrajectory(1000)
+    quad = Quadrotor3D(motor_noise=noise)    # Quadrotor model
+    controller = None
+    if(controller_type == "Acados"):
+        dt = 0.1      # Time step
+        controller = Controller(quad, t_horizon=2*N*dt, n_nodes=N)  # Initialize MPC controller
+    elif(controller_type == "PID"):
+        dt = 0.001      # Time step
+        controller = PIDController(quad, dt = dt)  # Initialize PID controller
+    else:
+        print("Invalid controller type")
+        return
+    xref = trajectory[:,0]
+    yref = trajectory[:,1]
+    zref = trajectory[:,2]
+    #xref, yref, zref = createTrajectory(10)
     trajectory = np.array([xref, yref, zref]).T
-    controller.update_trajectory(trajectory, preferred_speed=8)
+    controller.update_trajectory(trajectory, preferred_speed=preferred_speed)
     path = []
     q_path = []
     u_path = []
+
+    #xref_cmp, yref_cmp, zref_cmp = createTrajectory(int(sim_time/dt))
 
     # Main loop
     time_record = []
@@ -61,34 +77,26 @@ def trackTrajectory():
     print("max estimation time is {:.5f}".format(np.array(time_record).max()))
     print("min estimation time is {:.5f}".format(np.array(time_record).min()))
 
+    # reference_trajectory = np.array([xref_cmp, yref_cmp, zref_cmp]).T
+    
+    # # Приводим длины массивов к одинаковому размеру (на случай расхождений)
+    # min_len = min(len(path), len(reference_trajectory))
+    # path_trimmed = np.array(path)[:min_len]
+    # ref_trimmed = reference_trajectory[:min_len]
+    
+    # # Вычисляем Евклидово расстояние для каждого шага времени
+    # deviations = np.sqrt(np.sum((path_trimmed - ref_trimmed)**2, axis=1))
+    
+    # # Максимальное и среднее отклонение
+    # max_deviation = np.max(deviations)
+    # mean_deviation = np.mean(deviations)
+    
+    # print(f"Maximum deviation from path: {max_deviation:.4f} m")
+    # print(f"Average deviation from path: {mean_deviation:.4f} m")
+
     # Visualization
     path = np.array(path)
     # print(path)
-    plt.figure()
-    plt.title('UAV Position in ENU frame')
-    ax = plt.axes(projection='3d')
-    ax.plot(yref, xref, -zref, c=[1,0,0], label='goal')
-    ax.plot(path[:,1], path[:,0], -path[:,2])  # Swap x and y, negate z
-    ax.axis('auto')
-    ax.set_xlabel('y [m]')  # Swap x and y labels
-    ax.set_ylabel('x [m]')
-    ax.set_zlabel('-z [m]')  # Negate z label
-    ax.legend()
-
-    # Plot UAV attitude axes
-    interval = 50
-    for i in range(0, len(q_path), interval):
-        euler_angles = quaternion_to_euler(q_path[i])
-        origin = path[i]
-        R = np.array([[math.cos(euler_angles[2])*math.cos(euler_angles[1]), math.cos(euler_angles[2])*math.sin(euler_angles[1])*math.sin(euler_angles[0])-math.sin(euler_angles[2])*math.cos(euler_angles[0]), math.cos(euler_angles[2])*math.sin(euler_angles[1])*math.cos(euler_angles[0])+math.sin(euler_angles[2])*math.sin(euler_angles[0])],
-                  [math.sin(euler_angles[2])*math.cos(euler_angles[1]), math.sin(euler_angles[2])*math.sin(euler_angles[1])*math.sin(euler_angles[0])+math.cos(euler_angles[2])*math.cos(euler_angles[0]), math.sin(euler_angles[2])*math.sin(euler_angles[1])*math.cos(euler_angles[0])-math.cos(euler_angles[2])*math.sin(euler_angles[0])],
-                  [-math.sin(euler_angles[1]), math.cos(euler_angles[1])*math.sin(euler_angles[0]), math.cos(euler_angles[1])*math.cos(euler_angles[0])]])
-        x_axis = R @ np.array([1, 0, 0])
-        y_axis = R @ np.array([0, 1, 0])
-        z_axis = R @ np.array([0, 0, 1])
-        ax.quiver(origin[1], origin[0], -origin[2], y_axis[1], y_axis[0], -y_axis[2], color='r', length=0.05)  # Swap x and y, negate z
-        ax.quiver(origin[1], origin[0], -origin[2], x_axis[1], x_axis[0], -x_axis[2], color='g', length=0.05)  # Swap x and y, negate z
-        ax.quiver(origin[1], origin[0], -origin[2], -z_axis[1], -z_axis[0], z_axis[2], color='b', length=0.05)  # Swap x and y, negate z
 
     plt.figure()
     plt.plot(time_record)
@@ -140,9 +148,47 @@ def trackTrajectory():
     plt.ylabel('qz')
     plt.xlabel('Time [s]')
     plt.tight_layout()
+
+    # q_path = np.array(q_path)
+    # plt.figure()
+    # plt.suptitle("XYZ trajectory")
+    # plt.subplot(2, 2, 1)
+    # plt.plot(time, path[:,0])
+    # plt.ylabel('X')
+    # plt.xlabel('Time [s]')
+    # plt.plot(time, xref_cmp)
+    # plt.subplot(2, 2, 2)
+    # plt.plot(time, path[:,1])
+    # plt.plot(time, yref_cmp)
+    # plt.ylabel('Y')
+    # plt.xlabel('Time [s]')
+    # plt.subplot(2, 2, 3)
+    # plt.plot(time, path[:,2])
+    # plt.plot(time, zref_cmp)
+    # plt.ylabel('Z')
+    # plt.xlabel('Time [s]')
+    # plt.tight_layout()
     
-    plt.show()
+    
+    return path
 
 if __name__ == "__main__":
     # move2Goal()
-    trackTrajectory()
+    gt_traj = createTrajectory(100)
+    pid_traj = trackTrajectory(createTrajectory(2), controller_type="PID")
+    acados_traj = trackTrajectory(createTrajectory(10), controller_type="Acados", noise=True, preferred_speed=0.9)
+    print(gt_traj)
+
+
+    plt.figure()
+    plt.title('Визуализация траекторий дрона')
+    ax = plt.axes(projection='3d')
+    ax.plot(gt_traj[:,0], gt_traj[:,1], gt_traj[:,2], c=[0,0.7,0], label='Референсная траектория')
+    ax.plot(acados_traj[:,0], acados_traj[:,1], acados_traj[:,2], c=[0,0,1], label='Решение Acados контроллера')
+    ax.plot(pid_traj[:,0], pid_traj[:,1], pid_traj[:,2], c=[1,0,0], label='Решение PID контроллера')
+    ax.axis('auto')
+    ax.set_xlabel('x [m]')
+    ax.set_ylabel('y [m]')
+    ax.set_zlabel('z [m]') 
+    ax.legend()
+    plt.show()
