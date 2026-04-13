@@ -1,0 +1,10 @@
+quadrotor:
+  mass: 0.85
+  arm_length: 0.15
+  inertia:
+    xx: 0.001
+    yy: 0.001
+    zz: 0.0017
+  thrust_min: 0.0
+  thrust_to_weight_max: 3.3
+  torque_coeff: 0.05
