@@ -184,7 +184,7 @@ def trackTrajectory(
 if __name__ == "__main__":
     # move2Goal()
     gt_traj = createTrajectory(100)
-    pid_traj = trackTrajectory(createTrajectory(2), controller_type="PID")
+    # pid_traj = trackTrajectory(createTrajectory(2), controller_type="PID")
     acados_traj = trackTrajectory(
         createTrajectory(10), controller_type="Acados", noise=True, preferred_speed=0.9
     )
@@ -207,13 +207,13 @@ if __name__ == "__main__":
         c=[0, 0, 1],
         label="Решение Acados контроллера",
     )
-    ax.plot(
-        pid_traj[:, 0],
-        pid_traj[:, 1],
-        pid_traj[:, 2],
-        c=[1, 0, 0],
-        label="Решение PID контроллера",
-    )
+    # ax.plot(
+    #     pid_traj[:, 0],
+    #     pid_traj[:, 1],
+    #     pid_traj[:, 2],
+    #     c=[1, 0, 0],
+    #     label="Решение PID контроллера",
+    # )
     ax.axis("auto")
     ax.set_xlabel("x [m]")
     ax.set_ylabel("y [m]")
