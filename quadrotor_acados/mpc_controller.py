@@ -261,6 +261,7 @@ class Controller:
 
         if self.logger and self.counter % 100 == 0:
             self.logger.info(f"Current state={initial_state}")
+            self.logger.info(f"Current trajectory={local_trajectory}")
 
         self.counter += 1
 
