@@ -1,0 +1,12 @@
+px4_mpc_node:
+  ros__parameters:
+    path_topic: /reference_path
+    odometry_topic: /fmu/out/vehicle_odometry
+    vehicle_status_topic: /fmu/out/vehicle_status
+    actuator_topic: /fmu/in/actuator_motors
+    offboard_control_mode_topic: /fmu/in/offboard_control_mode
+    control_rate_hz: 250.0
+    offboard_control_rate_hz: 3.0
+    preferred_speed: 2.0
+    horizon_sec: 0.5
+    horizon_nodes: 10

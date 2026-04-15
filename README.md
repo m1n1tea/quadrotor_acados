@@ -1,5 +1,60 @@
 # Quadrotor Formation using Model Predictive Control
 
+## ROS 2 PX4 MPC Node
+This repository now includes a ROS 2 package `quadrotor_acados` that:
+- subscribes to `nav_msgs/msg/Path` (reference trajectory),
+- subscribes to `px4_msgs/msg/VehicleOdometry` (current state),
+- publishes `px4_msgs/msg/ActuatorMotors` (motor command).
+
+The node uses `quadrotor_acados/config/x500.yaml` by default.
+
+Build and run:
+```bash
+colcon build --packages-select quadrotor_acados
+source install/setup.bash
+ros2 launch quadrotor_acados px4_mpc.launch.py
+```
+
+### Python dependencies
+Install pip dependencies from `requirements.txt`:
+```bash
+pip install -r requirements.txt
+```
+
+ROS 2 Python modules used by this package are provided by ROS packages (not pip), including:
+- `rclpy`
+- `ament_index_python`
+- `geometry_msgs`
+- `nav_msgs`
+- `px4_msgs`
+- `launch`
+- `launch_ros`
+
+Install ROS dependencies with:
+```bash
+rosdep install --from-paths . --ignore-src -r -y
+```
+
+Important runtime parameters:
+- Topic names and node runtime parameters are defined in `quadrotor_acados/config/px4_mpc_node.yaml`.
+- `path_topic` (default from config: `/reference_path`)
+- `odometry_topic` (default from config: `/fmu/out/vehicle_odometry`)
+- `actuator_topic` (default from config: `/fmu/in/actuator_motors`)
+- `quadrotor_params_file` (default: installed `x500.yaml`)
+
+If you run the node directly, load the same config explicitly:
+```bash
+ros2 run quadrotor_acados px4_mpc_node --ros-args --params-file $(ros2 pkg prefix quadrotor_acados)/share/quadrotor_acados/config/px4_mpc_node.yaml
+```
+
+## Sample Trajectory Publisher
+The package includes a sample ROS 2 node that publishes a square reference trajectory as `nav_msgs/msg/Path`.
+
+Run:
+```bash
+ros2 run quadrotor_acados square_path_publisher
+```
+
 ## Install Acados
 To build Acados from source, see instructions [here](https://docs.acados.org/python_interface/index.html) or as follows:
 
@@ -79,4 +134,4 @@ ave estimation time is 0.00075
 max estimation time is 0.00104
 min estimation time is 0.00070
 ```
-![](results/time.png) 
+![](results/time.png)

@@ -1,0 +1,27 @@
+/**:
+  ros__parameters:
+    uav:
+      name: x500
+      parameters:
+        uav_mass: 2.0 # kg
+        num_of_arms: 4
+        arm_length: 0.25 # m
+        inertia:
+          xx: 0.08612 # kg*m^2
+          yy: 0.08962 # kg*m^2
+          zz: 0.16088 # kg*m^2
+        moment_constant: 0.016
+        thrust_constant: 8.54858e-06
+        min_rotor_speed: 0
+        max_rotor_speed: 1000
+        omega_to_pwm_coefficient:
+          x_2: 0.001142
+          x_1: 0.2273
+          x_0: 914.2
+        PWM_MIN: 1075
+        PWM_MAX: 1950
+        input_scaling: 1000
+        zero_position_armed: 10
+    environment:
+      parameters:
+        gravity: 9.81
