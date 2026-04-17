@@ -4,3 +4,4 @@ numpy
 PyYAML
 casadi
 setuptools
+pyquaternion

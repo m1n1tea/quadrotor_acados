@@ -45,7 +45,7 @@ class SquarePathPublisher(Node):
         ]
 
         samples: List[Tuple[float, float]] = []
-        for edge_idx in range(len(corners) - 1):
+        for edge_idx in range(len(corners) - 2):
             x0, y0 = corners[edge_idx]
             x1, y1 = corners[edge_idx + 1]
             for i in range(self.points_per_edge):
@@ -53,7 +53,7 @@ class SquarePathPublisher(Node):
                 x = (1.0 - t) * x0 + t * x1
                 y = (1.0 - t) * y0 + t * y1
                 samples.append((x, y))
-        samples.append(corners[-1])
+        #samples.append(corners[-1])
 
         msg = Path()
         msg.header.frame_id = self.frame_id

@@ -31,8 +31,8 @@ class QuadrotorParams:
         self.length = self.arm_length
         self.J = np.array([self.inertia_xx, self.inertia_yy, self.inertia_zz], dtype=float)
 
-        self.max_thrust = -self.thrust_max
-        self.min_thrust = -self.thrust_min
+        self.max_thrust = self.thrust_max
+        self.min_thrust = self.thrust_min
 
         if self.configuration == "+":
             self.x_f = np.array([self.length, 0.0, -self.length, 0.0], dtype=float)
@@ -40,7 +40,7 @@ class QuadrotorParams:
         else:
             h = np.cos(np.pi / 4.0) * self.length
             self.x_f = np.array([h, -h, -h, h], dtype=float)
-            self.y_f = np.array([-h, -h, h, h], dtype=float)
+            self.y_f = np.array([h, -h, h, -h], dtype=float)
 
         c = self.torque_coeff
         self.z_l_tau = np.array([-c, c, -c, c], dtype=float)

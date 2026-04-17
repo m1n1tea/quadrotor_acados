@@ -1,6 +1,9 @@
+import random
+
 import casadi as cs
 import numpy as np
 from acados_template import AcadosModel, AcadosOcp, AcadosOcpSolver
+from pyquaternion import Quaternion
 
 from .math_utils import (
     quaternion_inverse,
@@ -12,6 +15,39 @@ from .quadrotor_model import QuadrotorParams
 
 
 class Controller:
+    FRAME_TRANSFORM = np.array(
+        [[0.0, 1.0, 0.0], [1.0, 0.0, 0.0], [0.0, 0.0, -1.0]], dtype=float
+    )
+
+    @staticmethod
+    def ned_to_xyz_vector(vec: np.ndarray) -> np.ndarray:
+        return Controller.FRAME_TRANSFORM @ np.asarray(vec, dtype=float)
+
+    @staticmethod
+    def quat_to_rotmat(quat: np.ndarray) -> np.ndarray:
+        quat_arr = np.asarray(quat, dtype=float)
+        norm = np.linalg.norm(quat_arr)
+        if norm == 0.0:
+            return np.eye(3)
+        quat_obj = Quaternion(quat_arr / norm)
+        return np.array(quat_obj.rotation_matrix, dtype=float)
+
+    @staticmethod
+    def rotmat_to_quat(rotmat: np.ndarray) -> np.ndarray:
+        quat_obj = Quaternion(matrix=np.asarray(rotmat, dtype=float)).normalised
+        quat = np.array([quat_obj.w, quat_obj.x, quat_obj.y, quat_obj.z], dtype=float)
+        if quat[0] < 0.0:
+            quat *= -1.0
+        return quat
+
+    @staticmethod
+    def ned_to_xyz_quat(quat: np.ndarray) -> np.ndarray:
+        rotmat_ned = Controller.quat_to_rotmat(quat)
+        rotmat_xyz = (
+            Controller.FRAME_TRANSFORM @ rotmat_ned @ Controller.FRAME_TRANSFORM.T
+        )
+        return Controller.rotmat_to_quat(rotmat_xyz)
+
     def __init__(
         self,
         quad: QuadrotorParams,
@@ -27,10 +63,10 @@ class Controller:
     ):
         if q_cost is None:
             q_cost = np.array(
-                [10, 10, 10, 0.05, 0.05, 0.05, 0.05, 0.1, 0.1, 0.1, 0.05, 0.05]
+                [10, 10, 30, 0.05, 0.05, 0.05, 0.05, 0.1, 0.1, 0.1, 0.05, 0.05]
             )
         if r_cost is None:
-            r_cost = np.array([0.1, 0.1, 0.1, 0.1])
+            r_cost = np.array([0.01, 0.01, 0.01, 0.01])
 
         self.T = t_horizon
         self.N = n_nodes
@@ -133,6 +169,12 @@ class Controller:
 
         self.logger = logger
         self.counter = 0
+        self.predicted_change = None
+        self.prev_state = None
+        if self.logger:
+            self.logger.info(f"Controller time horizon = {t_horizon}")
+            self.logger.info(f"Controller steps = {n_nodes}")
+            self.logger.info(f"Controller dt = {t_horizon / n_nodes}")
 
     def acados_setup_model(self, nominal, model_name):
         def fill_in_acados_model(x, u, p, dynamics, name):
@@ -178,7 +220,7 @@ class Controller:
         g = cs.vertcat(0.0, 0.0, -9.81)
         a_thrust = (
             cs.vertcat(
-                0.0, 0.0, -(f_thrust[0] + f_thrust[1] + f_thrust[2] + f_thrust[3])
+                0.0, 0.0, (f_thrust[0] + f_thrust[1] + f_thrust[2] + f_thrust[3])
             )
             / self.quad.mass
         )
@@ -194,24 +236,26 @@ class Controller:
 
     def w_dynamics(self):
         f_thrust = self.u * self.quad.max_thrust
-        y_f = cs.MX(self.quad.y_f)
-        x_f = cs.MX(self.quad.x_f)
+
+        # swap x and y axes
+        y_f = cs.MX(self.quad.x_f)
+        x_f = cs.MX(self.quad.y_f)
         c_f = cs.MX(self.quad.z_l_tau)
 
         return cs.vertcat(
             (
-                cs.mtimes(f_thrust.T, y_f)
-                + (self.quad.J[1] - self.quad.J[2]) * self.r[1] * self.r[2]
+                cs.mtimes(f_thrust.T, x_f)
+                - (self.quad.J[2] - self.quad.J[1]) * self.r[1] * self.r[2]
             )
             / self.quad.J[0],
             (
-                -cs.mtimes(f_thrust.T, x_f)
-                + (self.quad.J[2] - self.quad.J[0]) * self.r[2] * self.r[0]
+                - cs.mtimes(f_thrust.T, y_f)
+                + (self.quad.J[2] - self.quad.J[0]) * self.r[0] * self.r[2]
             )
             / self.quad.J[1],
             (
                 cs.mtimes(f_thrust.T, c_f)
-                + (self.quad.J[0] - self.quad.J[1]) * self.r[0] * self.r[1]
+                - (self.quad.J[1] - self.quad.J[0]) * self.r[0] * self.r[1]
             )
             / self.quad.J[2],
         )
@@ -219,12 +263,31 @@ class Controller:
     def update_trajectory(
         self, trajectory: np.ndarray, preferred_speed: float | None = None
     ):
+        traj = np.array(trajectory, dtype=float, copy=True)
         if preferred_speed is None:
-            self.time_traj = trajectory
+            self.time_traj = traj
         else:
             self.time_traj = transform_trajectory(
-                trajectory, preferred_speed * self.T / self.N
+                traj, preferred_speed * self.T / self.N
             )
+
+        self.time_traj[:, :3] = np.array(
+            [self.ned_to_xyz_vector(point) for point in self.time_traj[:, :3]]
+        )
+        if self.time_traj.shape[1] >= 7:
+            self.time_traj[:, 3:7] = np.array(
+                [self.ned_to_xyz_quat(quat) for quat in self.time_traj[:, 3:7]]
+            )
+        if self.time_traj.shape[1] >= 10:
+            self.time_traj[:, 7:10] = np.array(
+                [self.ned_to_xyz_vector(vel) for vel in self.time_traj[:, 7:10]]
+            )
+        if self.time_traj.shape[1] >= 13:
+            self.time_traj[:, 10:13] = np.array(
+                [self.ned_to_xyz_vector(rate) for rate in self.time_traj[:, 10:13]]
+            )
+
+        # self.logger.info(f"Got new trajectory = {self.time_traj}")
         self.last_closest_index = 0
 
     def run_optimization(self, initial_state=None):
@@ -234,16 +297,23 @@ class Controller:
         if initial_state is None:
             initial_state = [0, 0, 0] + [1, 0, 0, 0] + [0, 0, 0] + [0, 0, 0]
 
-        x_init = np.stack(initial_state)
+        x_init = np.array(initial_state, dtype=float, copy=True)
+        x_init[0:3] = self.ned_to_xyz_vector(x_init[0:3])
+        x_init[3:7] = self.ned_to_xyz_quat(x_init[3:7])
+        x_init[7:10] = self.ned_to_xyz_vector(x_init[7:10])
+        x_init[10:13] = self.ned_to_xyz_vector(x_init[10:13])
 
         self.acados_ocp_solver.set(0, "lbx", x_init)
         self.acados_ocp_solver.set(0, "ubx", x_init)
 
+        solve_frame_id = random.getrandbits(64)
+        # if self.logger and self.counter % 5 == 0:
+        #     self.logger.info(f"Start solving {solve_frame_id}")
+
         starting_index = (
             np.argmin(
                 np.sum(
-                    (self.time_traj[self.last_closest_index :] - initial_state[:3])
-                    ** 2,
+                    (self.time_traj[self.last_closest_index :] - x_init[:3]) ** 2,
                     axis=1,
                 )
             )
@@ -258,12 +328,6 @@ class Controller:
                 "edge",
             )
         self.last_closest_index = starting_index
-
-        if self.logger and self.counter % 100 == 0:
-            self.logger.info(f"Current state={initial_state}")
-            self.logger.info(f"Current trajectory={local_trajectory}")
-
-        self.counter += 1
 
         for j in range(self.N):
             y_ref = np.array(
@@ -311,7 +375,56 @@ class Controller:
         self.acados_ocp_solver.solve()
 
         w_opt_acados = np.ndarray((self.N, 4))
+        x_opt_acados = np.ndarray((self.N + 1, len(x_init)))
+        x_opt_acados[0, :] = self.acados_ocp_solver.get(0, "x")
         for i in range(self.N):
             w_opt_acados[i, :] = self.acados_ocp_solver.get(i, "u")
+            x_opt_acados[i + 1, :] = self.acados_ocp_solver.get(i + 1, "x")
+        w_opt_acados = np.reshape(w_opt_acados, (-1))
 
-        return np.reshape(w_opt_acados, (-1))[:4]
+
+
+        def w_dynamics(x, u):
+            f_thrust = u * self.quad.max_thrust
+
+            # swap x and y axes
+            y_f = self.quad.x_f
+            x_f = self.quad.y_f
+            c_f = self.quad.z_l_tau
+
+            a = np.array([np.inner(f_thrust, x_f), -np.inner(f_thrust, y_f), -np.inner(f_thrust, c_f)])
+            b = np.array([- (self.quad.J[2] - self.quad.J[1]) * x[11] * x[12], (self.quad.J[2] - self.quad.J[0]) * x[10] * x[12], - (self.quad.J[1] - self.quad.J[0]) * x[10] * x[11]])
+
+            a /= self.quad.J
+            b /= self.quad.J
+            return a,b
+
+        if self.logger and self.counter % 5 == 0:
+            if (
+                self.predicted_change is not None
+                and max((self.predicted_change - (x_init - self.prev_state))[10:13])
+                > 0.1
+            ):
+                # self.logger.info(f"Finish solving {solve_frame_id}")
+                a,b = w_dynamics(x_init, w_opt_acados[:4])
+                self.logger.info(f"current state = {x_init}")
+                self.logger.info(f"control = {w_opt_acados[:4]}")
+                self.logger.info(
+                    f"control angular acc = {a}"
+                )
+                self.logger.info(
+                    f"inertia angular acc = {b}"
+                )
+                self.logger.info(
+                    f"relative prediction error = {(self.predicted_change / (x_init - self.prev_state))[10:13]}"
+                )
+                self.logger.info(
+                    f"absolute prediction error = {(self.predicted_change - (x_init - self.prev_state))[10:13]}"
+                )
+                # self.logger.info(f"predicted trajectory next state = {x_opt_acados[1]}")
+            self.predicted_change = x_opt_acados[1] - x_init
+            self.prev_state = x_init
+
+        self.counter += 1
+
+        return w_opt_acados[:4]

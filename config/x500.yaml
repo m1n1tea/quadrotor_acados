@@ -7,9 +7,9 @@
         num_of_arms: 4
         arm_length: 0.25 # m
         inertia:
-          xx: 0.08612 # kg*m^2
-          yy: 0.08962 # kg*m^2
-          zz: 0.16088 # kg*m^2
+          xx: 0.02166666666666667 # kg*m^2
+          yy: 0.02176666666666667 # kg*m^2
+          zz: 0.04000000000000001 # kg*m^2
         moment_constant: 0.016
         thrust_constant: 8.54858e-06
         min_rotor_speed: 0
