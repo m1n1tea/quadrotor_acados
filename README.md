@@ -6,13 +6,13 @@ This repository now includes a ROS 2 package `quadrotor_acados` that:
 - subscribes to `px4_msgs/msg/VehicleOdometry` (current state),
 - publishes `px4_msgs/msg/ActuatorMotors` (motor command).
 
-The node uses `quadrotor_acados/config/x500.yaml` by default.
+The launch file uses `quadrotor_acados/config/x500.yaml` by default.
 
 Build and run:
 ```bash
 colcon build --packages-select quadrotor_acados
 source install/setup.bash
-ros2 launch quadrotor_acados px4_mpc.launch.py
+ros2 launch quadrotor_acados launch_mpc.py
 ```
 
 ### Python dependencies
@@ -21,38 +21,31 @@ Install pip dependencies from `requirements.txt`:
 pip install -r requirements.txt
 ```
 
-ROS 2 Python modules used by this package are provided by ROS packages (not pip), including:
-- `rclpy`
-- `ament_index_python`
-- `geometry_msgs`
-- `nav_msgs`
-- `px4_msgs`
-- `launch`
-- `launch_ros`
-
-Install ROS dependencies with:
-```bash
-rosdep install --from-paths . --ignore-src -r -y
-```
-
-Important runtime parameters:
-- Topic names and node runtime parameters are defined in `quadrotor_acados/config/px4_mpc_node.yaml`.
-- `path_topic` (default from config: `/reference_path`)
-- `odometry_topic` (default from config: `/fmu/out/vehicle_odometry`)
-- `actuator_topic` (default from config: `/fmu/in/actuator_motors`)
-- `quadrotor_params_file` (default: installed `x500.yaml`)
+Topic names and node runtime parameters are defined in `quadrotor_acados/config/x500.yaml`.
 
 If you run the node directly, load the same config explicitly:
 ```bash
-ros2 run quadrotor_acados px4_mpc_node --ros-args --params-file $(ros2 pkg prefix quadrotor_acados)/share/quadrotor_acados/config/px4_mpc_node.yaml
+ros2 run quadrotor_acados px4_mpc_node --ros-args --params-file $(ros2 pkg prefix quadrotor_acados)/share/quadrotor_acados/config/x500.yaml
 ```
 
 ## Sample Trajectory Publisher
-The package includes a sample ROS 2 node that publishes a square reference trajectory as `nav_msgs/msg/Path`.
+The package includes a ROS 2 node that publishes an Nx3 `.npy` reference trajectory as `nav_msgs/msg/Path`.
 
-Run:
+Generate the built-in sample trajectories as `.npy` files:
 ```bash
-ros2 run quadrotor_acados square_path_publisher
+python3 utils/path_generators.py --output-dir /absolute/path/to/trajectories
+```
+
+Run one directly:
+```bash
+ros2 run quadrotor_acados path_publisher --ros-args \
+  -p points_file:=/absolute/path/to/trajectories/square_path.npy
+```
+
+Or through launch:
+```bash
+ros2 launch quadrotor_acados launch_path_publisher.py \
+  points_file:=/absolute/path/to/trajectories/square_path.npy
 ```
 
 ## Install Acados
@@ -120,18 +113,3 @@ with the quadrotor’s arm length $l$ and the rotor’s torque constant $`c_\tau
 ```math
 0\leq T_{min} \leq T_i \leq T_{max}
 ```
-
-
-## Results
-### Control performance
-Moving to goal           |   Trajectory tracking 
-:-----------------------:|:-------------------------:
-![](results/result.png)  |  ![](results/tracking.png)
-
-### CPU time
-```
-ave estimation time is 0.00075
-max estimation time is 0.00104
-min estimation time is 0.00070
-```
-![](results/time.png)
